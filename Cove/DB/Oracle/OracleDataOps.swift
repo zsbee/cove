@@ -28,9 +28,9 @@ extension OracleBackend {
             let dataSql = "SELECT * FROM \(fqn)\(orderClause) OFFSET \(offset) ROWS FETCH NEXT \(limit) ROWS ONLY"
             var rows: [[String?]] = []
             do {
-                let dataRows = try await conn.execute(OracleStatement(unsafeSQL: dataSql))
+                let dataRows = try await conn.execute(dataSql)
                 for try await row in dataRows {
-                    rows.append(self.decodeRowCells(row))
+                    rows.append(row.values)
                 }
             } catch let error as OracleSQLError {
                 throw DbError.query(error.serverMessage)
@@ -39,7 +39,7 @@ extension OracleBackend {
             let countSql = "SELECT COUNT(*) FROM \(fqn)"
             var totalCount: Int64 = 0
             do {
-                let countRows = try await conn.execute(OracleStatement(unsafeSQL: countSql))
+                let countRows = try await conn.execute(countSql)
                 for try await row in countRows.decode(Int.self) {
                     totalCount = Int64(row)
                 }
@@ -77,8 +77,8 @@ extension OracleBackend {
             column: column, newValue: newValue
         )
         do {
-            try await client.withConnection { conn in
-                try await conn.execute(OracleStatement(unsafeSQL: sql))
+            _ = try await client.withConnection { conn in
+                try await conn.execute(sql)
             }
         } catch let error as OracleSQLError {
             throw DbError.query(error.serverMessage)
@@ -91,10 +91,10 @@ extension OracleBackend {
 
     // MARK: - Shared helpers
 
-    func runQuery(conn: inout OracleClient.PooledConnection, sql: String) async throws -> QueryResult {
-        let stream: OracleRowSequence
+    func runQuery(conn: inout OracleSession, sql: String) async throws -> QueryResult {
+        let stream: OracleResultRows
         do {
-            stream = try await conn.execute(OracleStatement(unsafeSQL: sql))
+            stream = try await conn.execute(sql)
         } catch let error as OracleSQLError {
             throw DbError.query(error.serverMessage)
         } catch let error as DbError {
@@ -103,34 +103,15 @@ extension OracleBackend {
             throw DbError.query(String(describing: error))
         }
 
-        var columnInfos: [ColumnInfo] = []
+        var columnInfos: [ColumnInfo] = stream.columns
         var allRows: [[String?]] = []
-        var columnsExtracted = false
-
-        do {
-            for try await row in stream {
-                if !columnsExtracted {
-                    for cell in row {
-                        columnInfos.append(ColumnInfo(
-                            name: cell.columnName,
-                            typeName: String(describing: cell.dataType),
-                            isPrimaryKey: false
-                        ))
-                    }
-                    columnsExtracted = true
-                }
-                allRows.append(decodeRowCells(row))
-            }
-        } catch let error as OracleSQLError {
-            throw DbError.query(error.serverMessage)
-        } catch let error as DbError {
-            throw error
-        } catch {
-            throw DbError.query(String(describing: error))
+        for await row in stream {
+            if columnInfos.isEmpty { columnInfos = row.columns }
+            allRows.append(row.values)
         }
 
         if columnInfos.isEmpty {
-            return QueryResult(columns: [], rows: [], rowsAffected: 0, totalCount: nil)
+            return QueryResult(columns: [], rows: [], rowsAffected: UInt64(max(0, stream.affected ?? 0)), totalCount: nil)
         }
 
         return QueryResult(columns: columnInfos, rows: allRows, rowsAffected: nil, totalCount: nil)
@@ -142,7 +123,7 @@ extension OracleBackend {
                 SELECT username FROM all_users \
                 ORDER BY username
                 """
-            let schemaRows = try await conn.execute(OracleStatement(unsafeSQL: schemaSQL))
+            let schemaRows = try await conn.execute(schemaSQL)
             let systemSchemas = OracleBackend.systemSchemas
             var schemas: [String] = []
             for try await row in schemaRows.decode(String.self) {
@@ -156,7 +137,7 @@ extension OracleBackend {
                 FROM all_tab_columns \
                 ORDER BY owner, table_name, column_id
                 """
-            let colRows = try await conn.execute(OracleStatement(unsafeSQL: colSQL))
+            let colRows = try await conn.execute(colSQL)
             var tableMap: [String: [String: [CompletionColumn]]] = [:]
             for try await (schema, tableName, colName, dataType) in colRows.decode((String, String, String, String).self) {
                 guard !systemSchemas.contains(schema) else { continue }
@@ -177,7 +158,7 @@ extension OracleBackend {
                 AND procedure_name IS NULL \
                 ORDER BY object_name
                 """
-            let funcRows = try await conn.execute(OracleStatement(unsafeSQL: funcSQL))
+            let funcRows = try await conn.execute(funcSQL)
             var functions: [String] = []
             for try await row in funcRows.decode(String.self) {
                 functions.append(row)
@@ -187,7 +168,7 @@ extension OracleBackend {
                 SELECT DISTINCT type_name FROM all_types \
                 ORDER BY type_name
                 """
-            let typeRows = try await conn.execute(OracleStatement(unsafeSQL: typeSQL))
+            let typeRows = try await conn.execute(typeSQL)
             var types: [String] = []
             for try await row in typeRows.decode(String.self) {
                 types.append(row)
@@ -198,7 +179,7 @@ extension OracleBackend {
     }
 
     func fetchColumnInfo(
-        conn: inout OracleClient.PooledConnection,
+        conn: inout OracleSession,
         schema: String,
         table: String
     ) async throws -> [ColumnInfo] {
@@ -221,7 +202,7 @@ extension OracleBackend {
             WHERE c.owner = '\(schema)' AND c.table_name = '\(table)' \
             ORDER BY c.column_id
             """
-        let rows = try await conn.execute(OracleStatement(unsafeSQL: sql))
+        let rows = try await conn.execute(sql)
         var columns: [ColumnInfo] = []
         for try await (name, typeName, isPK) in rows.decode((String, String, Int).self) {
             columns.append(ColumnInfo(name: name, typeName: typeName, isPrimaryKey: isPK != 0))

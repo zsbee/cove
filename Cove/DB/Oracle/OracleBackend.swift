@@ -4,8 +4,8 @@ import Logging
 
 final class OracleBackend: DatabaseBackend, @unchecked Sendable {
     let name = "Oracle"
-    let client: OracleClient
-    private let runningTask: Task<Void, Never>
+    let client: OracleSession
+    private let runningTask: Task<Void, Never>?
 
     let syntaxKeywords: Set<String> = [
         "SELECT", "FROM", "WHERE", "INSERT", "INTO", "UPDATE", "DELETE", "SET",
@@ -34,12 +34,19 @@ final class OracleBackend: DatabaseBackend, @unchecked Sendable {
         "OFFSET", "ROWS", "ONLY", "NEXT",
     ]
 
-    private init(client: OracleClient, runningTask: Task<Void, Never>) {
+    private init(client: OracleSession, runningTask: Task<Void, Never>?) {
         self.client = client
         self.runningTask = runningTask
     }
 
     static func connect(config: ConnectionConfig) async throws -> OracleBackend {
+        if let settings = config.oracle, settings.mode == .tns {
+            let jdbc = try OracleJDBCSession(config: config, settings: settings)
+            try await withTaskCancellationHandler {
+                try await jdbc.ready()
+            } onCancel: { jdbc.stop() }
+            return OracleBackend(client: OracleSession(native: nil, jdbc: jdbc, decode: { _ in [] }), runningTask: nil)
+        }
         let port = Int(config.port) ?? 1521
         let oraConfig = OracleConnection.Configuration(
             host: config.host,
@@ -49,26 +56,50 @@ final class OracleBackend: DatabaseBackend, @unchecked Sendable {
             password: config.password
         )
 
-        let client = OracleClient(configuration: oraConfig)
-        let task = Task { await client.run() }
+        return try await connect(configuration: oraConfig, timeout: 15)
+    }
 
+    private static func connect(configuration: OracleConnection.Configuration, timeout: Int) async throws -> OracleBackend {
+        // Surface listener/authentication errors instead of the pool's indefinite retries.
+        let probe: OracleConnection
         do {
-            try await client.withConnection { conn in
-                try await conn.execute(OracleStatement(unsafeSQL: "SELECT 1 FROM DUAL"))
-            }
+            probe = try await OracleConnection.connect(configuration: configuration, id: 0)
         } catch let error as OracleSQLError {
-            task.cancel()
+            if let number = error.serverInfo?.number, [1017, 28000, 28001, 28009].contains(number) {
+                throw OracleAuthenticationError(message: error.serverMessage)
+            }
             throw DbError.connection(error.serverMessage)
-        } catch {
-            task.cancel()
-            throw DbError.connection(String(describing: error))
         }
-
-        return OracleBackend(client: client, runningTask: task)
+        do {
+            try Task.checkCancellation()
+            try await withTaskCancellationHandler {
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try await probe.execute(OracleStatement(unsafeSQL: "SELECT 1 FROM DUAL"))
+                    }
+                    group.addTask {
+                        try await Task.sleep(for: .seconds(timeout))
+                        try? await probe.close()
+                        throw DbError.connection("Validation query timed out after \(timeout) seconds.")
+                    }
+                    defer { group.cancelAll() }
+                    _ = try await group.next()
+                }
+            } onCancel: {
+                Task { try? await probe.close() }
+            }
+            try await probe.close()
+        } catch {
+            try? await probe.close()
+            throw error
+        }
+        let client = OracleClient(configuration: configuration)
+        let task = Task { await client.run() }
+        return OracleBackend(client: OracleSession(native: client, jdbc: nil, decode: Self.decodeNativeRow), runningTask: task)
     }
 
     deinit {
-        runningTask.cancel()
+        runningTask?.cancel()
     }
 
     func quoteIdentifier(_ name: String) -> String {

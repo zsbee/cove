@@ -300,7 +300,7 @@ extension OracleBackend {
         expandable: Bool
     ) async throws -> [HierarchyNode] {
         try await client.withConnection { conn in
-            let rows = try await conn.execute(OracleStatement(unsafeSQL: sql))
+            let rows = try await conn.execute(sql)
             var nodes: [HierarchyNode] = []
             for try await row in rows.decode(String.self) {
                 nodes.append(HierarchyNode(name: row, icon: icon, tint: tint, isExpandable: expandable))
@@ -337,7 +337,7 @@ extension OracleBackend {
                 WHERE owner = '\(schema)' AND table_name = '\(relation)' \
                 ORDER BY constraint_name
                 """
-            let rows = try await conn.execute(OracleStatement(unsafeSQL: sql))
+            let rows = try await conn.execute(sql)
             var nodes: [HierarchyNode] = []
             for try await (name, contype) in rows.decode((String, String).self) {
                 let typeLabel = switch contype {

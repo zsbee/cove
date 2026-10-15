@@ -49,7 +49,7 @@ final class CassandraBackend: DatabaseBackend, @unchecked Sendable {
         do {
             _ = try await client.query("SELECT cluster_name FROM system.local")
         } catch {
-            try? client.shutdown()
+            try? await client.shutdownAsync()
             throw DbError.connection(String(describing: error))
         }
 

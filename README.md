@@ -89,6 +89,48 @@ If `xcodebuild` fails because Xcode has not completed setup on your machine, run
 
 Requires macOS 15+.
 
+### Build without Xcode
+
+With Apple's Command Line Tools and Homebrew on Apple Silicon:
+
+```bash
+brew install duckdb
+python3 build-and-run.py
+```
+
+This builds and opens `.build/Cove.app`, including database logos, the app icon,
+and the DuckDB library. To reopen it later, use `open .build/Cove.app`.
+Pass `--build-only` to skip launching.
+
+The script uses the installed macOS 26.5 SDK when available because the macOS 27
+Command Line Tools SDK lacks the SwiftUI macro plugin. Set `COVE_SDK` to override
+the SDK path. It also applies a local OracleNIO workaround for Swift 6.4's
+`@TaskLocal` attribute expansion bug. The Swift package constrains Collections
+and Async Algorithms to versions compatible with the older SDK.
+
+### Oracle TNS connections
+
+Select **Oracle → TNS** in New Connection. Choose the **TNSADMIN** directory,
+enter or select a **TNS name**, and provide your database username/password.
+Alternatively, paste `jdbc:oracle:thin:@alias?TNS_ADMIN=/path/to/wallet` into
+**URL override**; a nonempty URL overrides the directory and alias fields.
+
+TNS connections use a local Oracle JDBC Thin helper for SCAN listener redirects,
+DNS address failover, and Oracle auto-login wallets (`cwallet.sso`). Java 17+ is
+required. The build script compiles the helper and copies the Oracle 23.26.2
+driver/wallet libraries installed by IntelliJ into the local app bundle.
+Database passwords travel over the helper's stdin pipe, never command-line
+arguments. Basic connections continue to use OracleNIO. TNS-over-SSH is not
+supported. The native TNS parser validates the form; each DESCRIPTION currently
+must contain one ADDRESS and specify ordered routing (`LOAD_BALANCE=OFF`).
+
+Without XCTest (Command Line Tools only), run the standalone checks:
+
+```bash
+swiftc -parse-as-library Cove/DB/Oracle/OracleConnectionSettings.swift check-oracle.swift -o .build/check-oracle
+.build/check-oracle
+```
+
 ## Roadmap
 
 Contributions welcome:

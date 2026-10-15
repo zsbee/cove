@@ -9,6 +9,7 @@ final class DialogState {
     var user = ""
     var password = ""
     var database = ""
+    var oracle = OracleConnectionSettings()
     var error = ""
     var connecting = false
     var testing = false
@@ -38,6 +39,7 @@ final class DialogState {
         user = ""
         password = ""
         database = ""
+        oracle = OracleConnectionSettings()
         error = ""
         connecting = false
         testing = false

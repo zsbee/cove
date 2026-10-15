@@ -97,7 +97,7 @@ final class AppState {
         let config = ConnectionConfig(
             backend: saved.backend, host: saved.host, port: saved.port,
             user: saved.user, password: saved.password, database: saved.database,
-            sshTunnel: saved.sshTunnelConfig
+            sshTunnel: saved.sshTunnelConfig, oracle: saved.oracle
         )
         Task {
             await performConnect(config: config)
@@ -107,6 +107,7 @@ final class AppState {
     }
 
     func dialogConnect() {
+        guard validateOracleSettings() else { return }
         saveCurrentQuery()
         dialog.connecting = true
         dialog.error = ""
@@ -129,12 +130,13 @@ final class AppState {
             sshAuthMethod: dialog.sshEnabled ? dialog.sshAuthMethod : nil,
             sshPassword: dialog.sshEnabled ? dialog.sshPassword : nil,
             sshPrivateKeyPath: dialog.sshEnabled ? dialog.sshPrivateKeyPath : nil,
-            sshPassphrase: dialog.sshEnabled ? dialog.sshPassphrase : nil
+            sshPassphrase: dialog.sshEnabled ? dialog.sshPassphrase : nil,
+            oracle: dialog.backend.capabilities.supportsTNS ? dialog.oracle : nil
         )
         let config = ConnectionConfig(
             backend: saved.backend, host: saved.host, port: saved.port,
             user: saved.user, password: saved.password, database: saved.database,
-            sshTunnel: saved.sshTunnelConfig
+            sshTunnel: saved.sshTunnelConfig, oracle: saved.oracle
         )
 
         Task {
@@ -170,6 +172,7 @@ final class AppState {
     }
 
     func dialogTest() {
+        guard validateOracleSettings() else { return }
         dialog.testing = true
         dialog.testResult = nil
         dialog.error = ""
@@ -184,7 +187,8 @@ final class AppState {
         let config = ConnectionConfig(
             backend: dialog.backend, host: dialog.host, port: dialog.port,
             user: dialog.user, password: dialog.password, database: dialog.database,
-            sshTunnel: sshTunnelConfig
+            sshTunnel: sshTunnelConfig,
+            oracle: dialog.backend.capabilities.supportsTNS ? dialog.oracle : nil
         )
 
         Task {
@@ -194,7 +198,7 @@ final class AppState {
                         try await coveConnect(config: config)
                     }
                     group.addTask {
-                        try await Task.sleep(for: .seconds(15))
+                        try await Task.sleep(for: .seconds(config.oracle?.mode == .tns ? 180 : 15))
                         throw CancellationError()
                     }
                     guard let result = try await group.next() else {
@@ -206,7 +210,7 @@ final class AppState {
                 await tunnel?.close()
                 self.dialog.testResult = (success: true, message: "Connection successful.")
             } catch is CancellationError {
-                self.dialog.testResult = (success: false, message: "Connection timed out after 15 seconds.")
+                self.dialog.testResult = (success: false, message: "Connection test timed out or was cancelled.")
             } catch {
                 self.dialog.testResult = (success: false, message: error.localizedDescription)
             }
@@ -228,6 +232,7 @@ final class AppState {
         dialog.user = conn.user
         dialog.password = conn.password
         dialog.database = conn.database
+        dialog.oracle = conn.oracle ?? OracleConnectionSettings()
         dialog.colorHex = conn.colorHex ?? CoveTheme.accentHex
         dialog.environment = conn.environment
         dialog.sshEnabled = conn.sshEnabled ?? false
@@ -242,6 +247,7 @@ final class AppState {
     }
 
     func dialogSaveEdit() {
+        guard validateOracleSettings() else { return }
         guard let editId = dialog.editingConnectionId,
               let idx = shared.savedConnections.firstIndex(where: { $0.id == editId }) else { return }
 
@@ -253,6 +259,7 @@ final class AppState {
         c.user = dialog.user
         c.password = dialog.password
         c.database = dialog.database
+        c.oracle = dialog.backend.capabilities.supportsTNS ? dialog.oracle : nil
         c.colorHex = dialog.colorHex
         c.sshEnabled = dialog.sshEnabled ? true : nil
         c.sshHost = dialog.sshEnabled ? dialog.sshHost : nil
@@ -272,7 +279,7 @@ final class AppState {
             let config = ConnectionConfig(
                 backend: c.backend, host: c.host, port: c.port,
                 user: c.user, password: c.password, database: c.database,
-                sshTunnel: c.sshTunnelConfig
+                sshTunnel: c.sshTunnelConfig, oracle: c.oracle
             )
             Task {
                 await performConnect(config: config)
@@ -282,6 +289,17 @@ final class AppState {
 
     func requestDeleteConnection(_ conn: SavedConnection) {
         connectionToDelete = conn
+    }
+
+    private func validateOracleSettings() -> Bool {
+        guard dialog.backend.capabilities.supportsTNS, dialog.oracle.mode == .tns else { return true }
+        do {
+            try dialog.backend.validateConnectionSettings(dialog.oracle)
+            return true
+        } catch {
+            dialog.error = error.localizedDescription
+            return false
+        }
     }
 
     func confirmDeleteConnection() {
@@ -1334,7 +1352,7 @@ final class AppState {
         let config = ConnectionConfig(
             backend: saved.backend, host: saved.host, port: saved.port,
             user: saved.user, password: saved.password, database: saved.database,
-            sshTunnel: saved.sshTunnelConfig
+            sshTunnel: saved.sshTunnelConfig, oracle: saved.oracle
         )
 
         do {

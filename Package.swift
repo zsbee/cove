@@ -6,6 +6,10 @@ let package = Package(
     name: "Cove",
     platforms: [.macOS(.v15)],
     dependencies: [
+        .package(url: "https://github.com/apple/swift-collections.git", "1.3.0"..<"1.4.0"),
+        .package(url: "https://github.com/apple/swift-async-algorithms.git", "1.0.0"..<"1.1.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.37.2"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.104.0"),
         .package(url: "https://github.com/vapor/postgres-nio", from: "1.21.0"),
         .package(url: "https://github.com/vapor/mysql-nio", from: "1.9.0"),
         .package(url: "https://github.com/apple/swift-cassandra-client.git", from: "0.9.1"),
@@ -27,11 +31,13 @@ let package = Package(
                 .product(name: "MongoKitten", package: "MongoKitten"),
                 .product(name: "RediStack", package: "RediStack"),
                 .product(name: "OracleNIO", package: "oracle-nio"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "CosmoMSSQL", package: "CosmoSQLClient-Swift"),
                 .product(name: "ClickHouseNIO", package: "ClickHouseNIO"),
                 "CDuckDB",
             ],
             path: "Cove",
+            exclude: ["Assets.xcassets", "Info.plist", "DB/README.md"],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ],
@@ -44,5 +50,16 @@ let package = Package(
             name: "CDuckDB",
             path: "Sources/CDuckDB"
         ),
+        .testTarget(name: "CoveTests", dependencies: ["Cove"], path: "CoveTests"),
+        .executableTarget(name: "OracleTLSCheck", dependencies: [
+            .product(name: "NIOSSL", package: "swift-nio-ssl"),
+            .product(name: "NIOCore", package: "swift-nio"),
+            .product(name: "NIOPosix", package: "swift-nio"),
+            .product(name: "NIOTLS", package: "swift-nio"),
+        ], path: "Checks/OracleTLSCheck"),
+        .executableTarget(name: "OracleStartupCheck", dependencies: [
+            .product(name: "OracleNIO", package: "oracle-nio"),
+            .product(name: "NIOSSL", package: "swift-nio-ssl"),
+        ], path: "Checks/OracleStartupCheck"),
     ]
 )

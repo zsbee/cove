@@ -19,7 +19,7 @@ extension OracleBackend {
         return f
     }()
 
-    func decodeRowCells(_ row: OracleRow) -> [String?] {
+    static func decodeNativeRow(_ row: OracleRow) -> [String?] {
         var result: [String?] = []
         var iter = row.makeIterator()
         while let cell = iter.next() {
@@ -34,7 +34,7 @@ extension OracleBackend {
 
     // MARK: - Cell decoder
 
-    private func decodeCell(_ cell: OracleCell) -> String {
+    private static func decodeCell(_ cell: OracleCell) -> String {
         let dt = cell.dataType
         do {
             if dt == .boolean {
@@ -99,7 +99,7 @@ extension OracleBackend {
         }
     }
 
-    private func decodeNumber(_ cell: OracleCell) -> String {
+    private static func decodeNumber(_ cell: OracleCell) -> String {
         if let i = try? cell.decode(Int.self) { return String(i) }
         if let d = try? cell.decode(Double.self) { return String(d) }
         if let s = try? cell.decode(String.self) { return s }

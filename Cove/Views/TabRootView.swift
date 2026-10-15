@@ -67,5 +67,12 @@ struct PerWindowSetup: NSViewRepresentable {
 }
 
 extension FocusedValues {
-    @Entry var appState: AppState?
+    var appState: AppState? {
+        get { self[AppStateFocusedKey.self] }
+        set { self[AppStateFocusedKey.self] = newValue }
+    }
+}
+
+private struct AppStateFocusedKey: FocusedValueKey {
+    typealias Value = AppState
 }

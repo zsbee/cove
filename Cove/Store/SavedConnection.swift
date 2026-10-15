@@ -34,6 +34,7 @@ struct SavedConnection: Codable, Identifiable {
     var database: String
     var colorHex: String?
     var environment: ConnectionEnvironment = .local
+    var oracle: OracleConnectionSettings?
 
     // SSH tunnel (all optional for backward compatibility)
     var sshEnabled: Bool?
@@ -66,7 +67,8 @@ struct SavedConnection: Codable, Identifiable {
         sshEnabled: Bool? = nil, sshHost: String? = nil,
         sshPort: String? = nil, sshUser: String? = nil,
         sshAuthMethod: SSHAuthMethod? = nil, sshPassword: String? = nil,
-        sshPrivateKeyPath: String? = nil, sshPassphrase: String? = nil
+        sshPrivateKeyPath: String? = nil, sshPassphrase: String? = nil,
+        oracle: OracleConnectionSettings? = nil
     ) {
         self.id = id
         self.name = name
@@ -78,6 +80,7 @@ struct SavedConnection: Codable, Identifiable {
         self.database = database
         self.colorHex = colorHex
         self.environment = environment
+        self.oracle = oracle
         self.sshEnabled = sshEnabled
         self.sshHost = sshHost
         self.sshPort = sshPort
@@ -93,6 +96,7 @@ struct SavedConnection: Codable, Identifiable {
         case id, name, backend, host, port, user, database, colorHex, environment
         case sshEnabled, sshHost, sshPort, sshUser, sshAuthMethod
         case sshPrivateKeyPath
+        case oracle
         // password, sshPassword, sshPassphrase intentionally excluded
     }
 
@@ -107,6 +111,7 @@ struct SavedConnection: Codable, Identifiable {
         database = try c.decode(String.self, forKey: .database)
         colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex)
         environment = try c.decodeIfPresent(ConnectionEnvironment.self, forKey: .environment) ?? .local
+        oracle = try c.decodeIfPresent(OracleConnectionSettings.self, forKey: .oracle)
         sshEnabled = try c.decodeIfPresent(Bool.self, forKey: .sshEnabled)
         sshHost = try c.decodeIfPresent(String.self, forKey: .sshHost)
         sshPort = try c.decodeIfPresent(String.self, forKey: .sshPort)
@@ -119,6 +124,11 @@ struct SavedConnection: Codable, Identifiable {
 
     func savePasswords() {
         let prefix = id.uuidString
+        if let walletPassword = oracle?.walletPassword, !walletPassword.isEmpty {
+            SecretStore.save(account: "\(prefix).oracleWalletPassword", password: walletPassword)
+        } else {
+            SecretStore.delete(account: "\(prefix).oracleWalletPassword")
+        }
         if !password.isEmpty {
             SecretStore.save(account: "\(prefix).password", password: password)
         }
@@ -132,6 +142,7 @@ struct SavedConnection: Codable, Identifiable {
 
     mutating func loadPasswords() {
         let prefix = id.uuidString
+        oracle?.walletPassword = SecretStore.load(account: "\(prefix).oracleWalletPassword") ?? ""
         password = SecretStore.load(account: "\(prefix).password") ?? ""
         sshPassword = SecretStore.load(account: "\(prefix).sshPassword")
         sshPassphrase = SecretStore.load(account: "\(prefix).sshPassphrase")
@@ -142,5 +153,6 @@ struct SavedConnection: Codable, Identifiable {
         SecretStore.delete(account: "\(prefix).password")
         SecretStore.delete(account: "\(prefix).sshPassword")
         SecretStore.delete(account: "\(prefix).sshPassphrase")
+        SecretStore.delete(account: "\(prefix).oracleWalletPassword")
     }
 }

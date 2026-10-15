@@ -6,6 +6,7 @@ struct BackendCapabilities: Sendable {
     let usesDatabaseName: Bool
     let usesFilePath: Bool
     let supportsSSH: Bool
+    var supportsTNS: Bool = false
 }
 
 enum BackendType: String, Codable, CaseIterable, Sendable {
@@ -79,6 +80,9 @@ enum BackendType: String, Codable, CaseIterable, Sendable {
 
     var capabilities: BackendCapabilities {
         switch self {
+        case .oracle:
+            BackendCapabilities(usesHostPort: true, usesCredentials: true, usesDatabaseName: true,
+                                usesFilePath: false, supportsSSH: true, supportsTNS: true)
         case .sqlite, .duckdb:
             BackendCapabilities(
                 usesHostPort: false,
@@ -99,6 +103,19 @@ enum BackendType: String, Codable, CaseIterable, Sendable {
     }
 
     var isFileBased: Bool { capabilities.usesFilePath }
+
+    func validateConnectionSettings(_ settings: OracleConnectionSettings) throws {
+        if capabilities.supportsTNS, settings.mode == .tns {
+            _ = try OracleTNS.load(settings: settings)
+        }
+    }
+
+    func connectionAliases(_ settings: OracleConnectionSettings) throws -> [String] {
+        guard capabilities.supportsTNS else { return [] }
+        let directory = settings.jdbcURL.isEmpty ? settings.tnsAdmin : try settings.resolvedLocation.directory
+        guard !directory.isEmpty else { return [] }
+        return try OracleTNS.aliases(in: directory)
+    }
 
     var connectionNotice: String? {
         switch self {
@@ -140,8 +157,9 @@ struct ConnectionConfig: Sendable {
     let password: String
     let database: String
     let sshTunnel: SSHTunnelConfig?
+    let oracle: OracleConnectionSettings?
 
-    init(backend: BackendType, host: String, port: String, user: String, password: String, database: String, sshTunnel: SSHTunnelConfig? = nil) {
+    init(backend: BackendType, host: String, port: String, user: String, password: String, database: String, sshTunnel: SSHTunnelConfig? = nil, oracle: OracleConnectionSettings? = nil) {
         self.backend = backend
         // macOS resolves "localhost" to IPv6 ::1, but many database servers
         // (MySQL, MariaDB, …) only listen on IPv4 127.0.0.1 by default.
@@ -151,12 +169,17 @@ struct ConnectionConfig: Sendable {
         self.password = password
         self.database = database
         self.sshTunnel = sshTunnel
+        self.oracle = oracle
     }
 }
 
 func coveConnect(config: ConnectionConfig) async throws -> (any DatabaseBackend, SSHTunnel?) {
     var effectiveConfig = config
     var tunnel: SSHTunnel?
+
+    if config.oracle?.mode == .tns, config.sshTunnel != nil {
+        throw DbError.connection("TNS connections cannot use Cove's SSH tunnel. Connect to your VPN, or use a Basic connection with SSH.")
+    }
 
     if config.backend.capabilities.usesHostPort, let sshConfig = config.sshTunnel {
         let remoteHost = config.host
@@ -173,7 +196,8 @@ func coveConnect(config: ConnectionConfig) async throws -> (any DatabaseBackend,
             port: String(established.localPort),
             user: config.user,
             password: config.password,
-            database: config.database
+            database: config.database,
+            oracle: config.oracle
         )
     }
 

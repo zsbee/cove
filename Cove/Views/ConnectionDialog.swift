@@ -10,6 +10,9 @@ struct ConnectionDialog: View {
     @State private var user = ""
     @State private var password = ""
     @State private var database = ""
+    @State private var oracle = OracleConnectionSettings()
+    @State private var tnsAliases: [String] = []
+    @State private var tnsError = ""
     @State private var selectedColor = CoveTheme.accent
     @State private var selectedEnvironment: ConnectionEnvironment = .local
 
@@ -26,6 +29,7 @@ struct ConnectionDialog: View {
     var body: some View {
         let dialog = state.dialog
         let capabilities = backend.capabilities
+        let usesTNS = capabilities.supportsTNS && oracle.mode == .tns
 
         VStack(spacing: 12) {
             Text(dialog.isEditing ? "Edit Connection" : "New Connection")
@@ -86,6 +90,18 @@ struct ConnectionDialog: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            if capabilities.supportsTNS {
+                formField("Connection type") {
+                    Picker("Connection type", selection: $oracle.mode) {
+                        Text("Basic").tag(OracleConnectionMode.basic)
+                        Text("TNS").tag(OracleConnectionMode.tns)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+                if usesTNS { tnsSection }
+            }
+
             if capabilities.usesFilePath {
                 formField("Database File") {
                     HStack(spacing: 8) {
@@ -100,7 +116,7 @@ struct ConnectionDialog: View {
                 }
             }
 
-            if capabilities.usesHostPort {
+            if capabilities.usesHostPort && !usesTNS {
                 HStack(spacing: 8) {
                     formField("Host") {
                         TextField("Host", text: $host)
@@ -126,14 +142,14 @@ struct ConnectionDialog: View {
                 }
             }
 
-            if capabilities.usesDatabaseName {
+            if capabilities.usesDatabaseName && !usesTNS {
                 formField("Database") {
                     TextField("Database", text: $database)
                         .textFieldStyle(.roundedBorder)
                 }
             }
 
-            if capabilities.supportsSSH {
+            if capabilities.supportsSSH && !usesTNS {
                 Divider()
 
                 sshSection
@@ -184,7 +200,7 @@ struct ConnectionDialog: View {
             }
         }
         .padding(24)
-        .frame(width: 400)
+        .frame(width: 480)
         .presentationBackground(.regularMaterial)
         .onAppear {
             name = dialog.name
@@ -194,6 +210,7 @@ struct ConnectionDialog: View {
             user = dialog.user
             password = dialog.password
             database = dialog.database
+            oracle = dialog.oracle
             selectedColor = Color(hex: dialog.colorHex)
             selectedEnvironment = dialog.environment
             sshEnabled = dialog.sshEnabled
@@ -214,6 +231,9 @@ struct ConnectionDialog: View {
                 sshEnabled = false
             }
         }
+        .onChange(of: oracle.mode) { _, mode in
+            if mode == .tns { sshEnabled = false }
+        }
         .onChange(of: dialog.testResult?.message) {
             guard let result = dialog.testResult else { return }
             let alert = NSAlert()
@@ -224,6 +244,63 @@ struct ConnectionDialog: View {
             alert.runModal()
             dialog.testResult = nil
         }
+    }
+
+    private var tnsSection: some View {
+        VStack(spacing: 12) {
+            formField("TNSADMIN") {
+                HStack {
+                    TextField("Directory containing tnsnames.ora", text: $oracle.tnsAdmin)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Browse…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = false
+                        panel.canChooseDirectories = true
+                        panel.allowsMultipleSelection = false
+                        if panel.runModal() == .OK, let url = panel.url { oracle.tnsAdmin = url.path }
+                    }
+                }
+            }
+            formField("TNS name") {
+                HStack {
+                    TextField("TNS alias", text: $oracle.tnsName)
+                        .textFieldStyle(.roundedBorder)
+                    Menu("Aliases") {
+                        ForEach(tnsAliases, id: \.self) { alias in
+                            Button(alias) { oracle.tnsName = alias }
+                        }
+                    }
+                    .disabled(tnsAliases.isEmpty)
+                }
+            }
+            formField("URL override") {
+                TextField("jdbc:oracle:thin:@alias?TNS_ADMIN=/path", text: $oracle.jdbcURL)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Text("A nonempty URL overrides TNSADMIN and TNS name. Authentication uses the User and Password fields below.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Oracle JDBC Thin handles listener redirects and the auto-login wallet (cwallet.sso). Java 17+ is required; no separate wallet password is needed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !tnsError.isEmpty {
+                Text(tnsError).font(.caption).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .onAppear { reloadAliases() }
+        .onChange(of: oracle.tnsAdmin) { reloadAliases() }
+        .onChange(of: oracle.jdbcURL) { reloadAliases() }
+    }
+
+    private func reloadAliases() {
+        tnsAliases = []
+        tnsError = ""
+        do {
+            tnsAliases = try backend.connectionAliases(oracle)
+        } catch { tnsError = error.localizedDescription }
     }
 
     @ViewBuilder
@@ -328,6 +405,7 @@ struct ConnectionDialog: View {
         dialog.user = user
         dialog.password = password
         dialog.database = database
+        dialog.oracle = oracle
         dialog.colorHex = selectedColor.hexString
         dialog.environment = selectedEnvironment
         dialog.sshEnabled = sshEnabled
