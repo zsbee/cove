@@ -7,7 +7,15 @@ struct OracleChecks {
         func record(_ host: String) { hosts.append(host) }
     }
 
-    static func main() async throws {
+    static func main() async {
+        do { try await run() }
+        catch {
+            print("FAIL: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+
+    static func run() async throws {
         let text = """
         # Multiple aliases and nested failover descriptions
         demo, synonym=(DESCRIPTION_LIST=(LOAD_BALANCE=OFF)(FAILOVER=ON)
@@ -48,6 +56,48 @@ struct OracleChecks {
         settings.jdbcURL = "jdbc:oracle:thin:user/password@demo"
         rejects { _ = try settings.resolvedLocation }
 
+        let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(".build/tns-jdbc-check-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("tnsnames.ora")
+        var jdbcSettings = OracleConnectionSettings()
+        jdbcSettings.mode = .tns
+        jdbcSettings.tnsAdmin = directory.path
+        jdbcSettings.tnsName = "demo"
+        let jdbcDescriptors = [
+            text.replacingOccurrences(of: "LOAD_BALANCE=OFF", with: "LOAD_BALANCE=ON"),
+            """
+            demo=(DESCRIPTION=(LOAD_BALANCE=ON)
+              (ADDRESS_LIST=(LOAD_BALANCE=ON)(FAILOVER=OFF)
+                (ADDRESS=(PROTOCOL=TCP)(HOST=first.example)(PORT=1521))
+                (ADDRESS=(PROTOCOL=TCPS)(HOST=second.example)(PORT=2484)))
+              (CONNECT_DATA=(SERVICE_NAME=demo_service)))
+            """,
+            text.replacingOccurrences(of: "FAILOVER=ON", with: "FAILOVER=OFF"),
+        ]
+        for descriptor in jdbcDescriptors {
+            try descriptor.write(to: file, atomically: true, encoding: .utf8)
+            try OracleTNS.validateForJDBC(settings: jdbcSettings)
+        }
+        jdbcSettings.jdbcURL = "jdbc:oracle:thin:@synonym?TNS_ADMIN=\(directory.path)"
+        jdbcSettings.tnsName = "ignored"
+        jdbcSettings.tnsAdmin = "/ignored"
+        try OracleTNS.validateForJDBC(settings: jdbcSettings)
+        jdbcSettings.jdbcURL = ""
+        jdbcSettings.tnsAdmin = directory.path
+        jdbcSettings.tnsName = "missing"
+        rejects { try OracleTNS.validateForJDBC(settings: jdbcSettings) }
+        jdbcSettings.tnsName = "demo"
+        try "demo=(DESCRIPTION=".write(to: file, atomically: true, encoding: .utf8)
+        rejects { try OracleTNS.validateForJDBC(settings: jdbcSettings) }
+        try FileManager.default.removeItem(at: file)
+        rejects { try OracleTNS.validateForJDBC(settings: jdbcSettings) }
+        jdbcSettings.jdbcURL = "jdbc:oracle:thin:user/password@demo"
+        rejects { try OracleTNS.validateForJDBC(settings: jdbcSettings) }
+        jdbcSettings.jdbcURL = "jdbc:oracle:thin:@demo?password=secret"
+        rejects { try OracleTNS.validateForJDBC(settings: jdbcSettings) }
+
         let attempts = Attempts()
         let plan = OracleConnectionPlan(endpoints: endpoints, directory: "/tmp")
         let connectedHost = try await OracleTNS.connect(plan: plan) { endpoint in
@@ -62,14 +112,14 @@ struct OracleChecks {
             let _: String = try await OracleTNS.connect(plan: plan) { _ in throw CancellationError() }
             fatalError("Expected cancellation")
         } catch is CancellationError {}
-        print("Oracle checks passed: JDBC override, TNS parsing, validation, secret exclusion, retries, failover, cancellation.")
+        print("Oracle checks passed: JDBC load balancing/multiple addresses/failover settings, alias validation, JDBC override, native routing restrictions, secret exclusion, retries, cancellation.")
 
         if CommandLine.arguments.count == 3 {
             settings.jdbcURL = ""
             settings.tnsAdmin = CommandLine.arguments[1]
             settings.tnsName = CommandLine.arguments[2]
-            let local = try OracleTNS.load(settings: settings)
-            print("Local TNS alias validated: \(local.endpoints.count) endpoints, protocols \(local.endpoints.map { $0.tls ? "TCPS" : "TCP" }.joined(separator: " → ")).")
+            try OracleTNS.validateForJDBC(settings: settings)
+            print("Local TNS alias validated for JDBC.")
         }
     }
 }

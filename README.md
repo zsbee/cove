@@ -39,7 +39,7 @@ Adding a new backend requires zero changes to UI code — see [`DB/README.md`](C
 - **Browse** schemas, tables, views, indexes, and keys in a sidebar tree
 - **Edit rows** inline with SQL/CQL preview before commit
 - **Run queries** with syntax highlighting and autocomplete
-- **Agent Mode** — generate or edit queries with Claude Code or Codex CLI
+- **Agent Mode** — generate or edit queries locally with Ollama, or with Claude Code or Codex CLI
 - **Multiple tabs** with independent connections (Cmd+T)
 - **Connection environments** — local, dev, staging, production
 - **SSH tunneling** — password or private key authentication
@@ -50,7 +50,7 @@ Adding a new backend requires zero changes to UI code — see [`DB/README.md`](C
 
 ## Agent Mode
 
-Agent Mode can create a new query or edit the current query block using a local agent CLI.
+Agent Mode can create a new query or edit the current query block. Ollama runs inference locally; Claude Code and Codex CLI may send context to their cloud providers.
 
 <img width="1068" height="316" alt="image" src="https://github.com/user-attachments/assets/eb78ed0f-c6ee-4293-888c-78f7c55f3072" />
 
@@ -62,12 +62,45 @@ Agent Mode can create a new query or edit the current query block using a local 
 
 Cove currently supports:
 
+- **Ollama (Local)** via its localhost HTTP API (the default)
 - **Claude Code** via the `claude` CLI
 - **Codex CLI** via the `codex` CLI
 
 The selected agent receives the current query block, the active backend and database metadata, the loaded browser tree, and completion schema context. Cove does not send database passwords to the agent prompt.
 
 Agent processes run locally from Cove's Application Support workspace. macOS may still show a Documents folder permission prompt if the underlying CLI tries to access a protected folder, especially when developing or launching Cove from a repository inside `~/Documents`.
+
+### Local Oracle SQL assistant
+
+1. Install [Ollama](https://ollama.com/). Cove starts it automatically in the background when Cove launches, and retries when local AI is used. No terminal is needed for everyday use.
+2. Download a coding model: `ollama pull qwen2.5-coder:14b` (roughly 9 GB). For less memory/download use `qwen2.5-coder:7b` instead.
+3. Connect to Oracle and select the owner/schema in the browser. Open the query editor and press **Cmd+K**.
+4. Choose **Ollama (Local)**. Open the gear button for **Local AI Settings**, select the installed model, and **Test Connection**.
+5. Describe a query or edit, then press **Cmd+Return**. Review the SQL and run it yourself.
+
+Cove's Ollama integration accepts only loopback HTTP endpoints, does not follow redirects, and rejects cloud models. There is no automatic cloud fallback. It supplies your request, current SQL, and scoped schema metadata—not connection credentials, hostnames, or result rows. Oracle metadata includes column types and ordered primary/foreign-key columns for the active owner; other owners and synonyms are not automatically loaded. Select a different owner to change scope. Mention exact table names or select a table to focus a large schema.
+
+AI metadata is cached for five minutes per connection/active schema. The refresh button clears the cache for the next generation. The gear button configures endpoint, model, and timeout using separate `queryAI.ollama.*` preferences; it does not migrate or overwrite saved connections or Keychain entries.
+
+**Start Ollama automatically with Cove** is enabled by default and can be turned off in Local AI Settings. Cove reuses an existing local server without taking ownership of it. If Cove starts a server, it binds to the configured loopback address, disables Ollama cloud access, and stops that server when Cove quits. Missing Ollama or startup failures do not block normal database browsing; AI actions report the error. Models are not downloaded or loaded into memory just by launching Cove.
+
+Generated SQL is never executed automatically. Missing-context responses, malformed/truncated output, and failed requests leave editor text unchanged. Model output still requires review: these checks do not prove Oracle SQL correctness or prevent a manually executed query from modifying data.
+
+Standalone local-AI checks (no database connection or app launch):
+
+```bash
+swiftc -swift-version 6 -parse-as-library \
+  Cove/Agents/QueryAgentTypes.swift Cove/Agents/LocalQuerySettings.swift \
+  Cove/Agents/OllamaQueryClient.swift Cove/Agents/LocalQueryContextBuilder.swift \
+  Cove/Agents/OllamaServer.swift Cove/Agents/ExecutableResolver.swift \
+  Cove/DB/CompletionTypes.swift Cove/DB/QueryDatabaseSchema.swift \
+  Checks/LocalQueryCheck/main.swift -o .build/check-local-query
+.build/check-local-query
+# Optional: test start/reuse/stop/restart on a temporary local port.
+.build/check-local-query --startup
+# Optional: generate sample Oracle SQL against a synthetic schema using Ollama.
+.build/check-local-query --live
+```
 
 ## Install
 
@@ -121,8 +154,10 @@ required. The build script compiles the helper and copies the Oracle 23.26.2
 driver/wallet libraries installed by IntelliJ into the local app bundle.
 Database passwords travel over the helper's stdin pipe, never command-line
 arguments. Basic connections continue to use OracleNIO. TNS-over-SSH is not
-supported. The native TNS parser validates the form; each DESCRIPTION currently
-must contain one ADDRESS and specify ordered routing (`LOAD_BALANCE=OFF`).
+supported. Cove checks that `tnsnames.ora` parses and contains the selected alias;
+JDBC interprets the original descriptor, including `LOAD_BALANCE=ON`, multiple
+addresses, and failover settings. Cove does not rewrite the TNS file or force
+ordered routing.
 
 Without XCTest (Command Line Tools only), run the standalone checks:
 

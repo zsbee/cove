@@ -60,6 +60,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Task { @MainActor in
+            // Startup failure must not block database browsing. The AI controls
+            // retry startup and show actionable errors when AI is requested.
+            try? await OllamaServer.shared.ensureRunning(settings: .load())
+        }
         for window in NSApp.windows {
             styleWindow(window)
         }
@@ -90,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         SharedStore.shared.saveAllTabSessions()
         SharedStore.shared.isTerminating = true
+        OllamaServer.shared.stopOwnedServers()
         return .terminateNow
     }
 

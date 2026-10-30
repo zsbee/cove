@@ -75,6 +75,8 @@ protocol DatabaseBackend: Sendable {
 
     func fetchCompletionSchema(database: String) async throws -> CompletionSchema
 
+    func fetchQuerySchema(database: String) async throws -> QueryDatabaseSchema
+
     func fetchServerVersion(database: String) async throws -> String?
 }
 
@@ -86,6 +88,9 @@ extension DatabaseBackend {
     func generateDropSQL(path: [String]) -> String? { nil }
     func structurePath(for tablePath: [String]) -> [String]? { tablePath + ["Columns"] }
     func fetchCompletionSchema(database: String) async throws -> CompletionSchema { .empty }
+    func fetchQuerySchema(database: String) async throws -> QueryDatabaseSchema {
+        QueryDatabaseSchema(schema: try await fetchCompletionSchema(database: database))
+    }
     func fetchServerVersion(database: String) async throws -> String? { nil }
 
     // Use this instead of error.localizedDescription — NIO and driver errors implement

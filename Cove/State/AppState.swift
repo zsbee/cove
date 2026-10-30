@@ -54,6 +54,8 @@ final class AppState {
     private var connectionGeneration = 0
     private var agentRunGeneration = 0
     private var activeAgentTask: Task<Void, Never>?
+    private var agentTimeoutTask: Task<Void, Never>?
+    private var localQuerySchemaCache: (generation: Int, database: String, schema: QueryDatabaseSchema, version: String?, loadedAt: Date)?
 
     // MARK: - Forwarding computed properties (views keep using state.savedConnections)
 
@@ -1098,9 +1100,18 @@ final class AppState {
             query.agentError = QueryAgentError.missingAgent.localizedDescription
             return
         }
+        let localSettings = LocalQuerySettings.load()
+        if kind == .ollama, instruction.count + currentQuery.count > 12000 {
+            query.agentError = "The request and current query are too large for local generation. Select a smaller SQL block."
+            return
+        }
         let treeChildren = tree.children
+        let connectionGeneration = self.connectionGeneration
+        let targetQuery = query
+        let originalText = query.text
 
         activeAgentTask?.cancel()
+        agentTimeoutTask?.cancel()
         agentRunGeneration += 1
         let runGeneration = agentRunGeneration
 
@@ -1108,37 +1119,64 @@ final class AppState {
         query.agentError = ""
         query.agentStatus = ""
 
-        Task {
-            try? await Task.sleep(for: .seconds(120))
-            guard agentRunGeneration == runGeneration, query.agentExecuting else { return }
+        agentTimeoutTask = Task {
+            do {
+                try await Task.sleep(for: .seconds(kind == .ollama ? min(max(localSettings.timeout, 10), 600) + 30 : 120))
+            } catch { return }
+            guard agentRunGeneration == runGeneration, targetQuery.agentExecuting else { return }
             activeAgentTask?.cancel()
             activeAgentTask = nil
             agentRunGeneration += 1
-            query.agentExecuting = false
-            query.agentError = "Timed out generating query with \(kind.displayName)."
+            targetQuery.agentExecuting = false
+            targetQuery.agentError = "Timed out generating query with \(kind.displayName)."
         }
 
         let generationTask = Task {
             defer {
                 if agentRunGeneration == runGeneration {
-                    query.agentExecuting = false
+                    agentTimeoutTask?.cancel()
+                    agentTimeoutTask = nil
+                    targetQuery.agentExecuting = false
                     activeAgentTask = nil
                 }
             }
             do {
-                async let versionResult = conn.fetchServerVersion(database: database)
-                async let schemaResult = conn.fetchCompletionSchema(database: database)
-
-                let schema = (try? await schemaResult) ?? completionSchema
-                let context = QueryAgentContextBuilder.build(
-                    savedConnection: saved,
-                    backend: conn,
-                    database: database,
-                    selectedPath: selectedPath,
-                    treeChildren: treeChildren,
-                    completionSchema: schema,
-                    serverVersion: try? await versionResult
-                )
+                let context: String
+                if kind == .ollama {
+                    try await OllamaServer.shared.ensureRunning(settings: localSettings)
+                    try Task.checkCancellation()
+                    _ = try await OllamaQueryClient(settings: LocalQuerySettings(
+                        endpoint: localSettings.endpoint, model: localSettings.model, timeout: 10
+                    )).testConnection()
+                    let metadata: QueryDatabaseSchema
+                    let version: String?
+                    if let cache = localQuerySchemaCache,
+                       cache.generation == connectionGeneration, cache.database == database,
+                       Date().timeIntervalSince(cache.loadedAt) < 300 {
+                        metadata = cache.schema
+                        version = cache.version
+                    } else {
+                        metadata = try await conn.fetchQuerySchema(database: database)
+                        version = try? await conn.fetchServerVersion(database: database)
+                        try Task.checkCancellation()
+                        guard self.connectionGeneration == connectionGeneration else { return }
+                        localQuerySchemaCache = (connectionGeneration, database, metadata, version, Date())
+                    }
+                    context = try LocalQueryContextBuilder.build(
+                        schema: metadata, backendName: conn.name, database: database, serverVersion: version,
+                        selectedPath: selectedPath, instruction: instruction, currentQuery: currentQuery
+                    )
+                } else {
+                    async let versionResult = conn.fetchServerVersion(database: database)
+                    async let schemaResult = conn.fetchCompletionSchema(database: database)
+                    let schema = (try? await schemaResult) ?? completionSchema
+                    context = QueryAgentContextBuilder.build(
+                        savedConnection: saved, backend: conn, database: database,
+                        selectedPath: selectedPath, treeChildren: treeChildren,
+                        completionSchema: schema, serverVersion: try? await versionResult
+                    )
+                }
+                try Task.checkCancellation()
 
                 let session = QueryAgentSession(kind: kind)
                 let request = QueryAgentRequest(
@@ -1146,12 +1184,18 @@ final class AppState {
                     currentQuery: currentQuery,
                     databaseContext: context
                 )
-                let response = try await session.generate(request: request)
+                let response = try await session.generate(request: request, localSettings: localSettings)
 
                 guard agentRunGeneration == runGeneration,
+                      self.connectionGeneration == connectionGeneration,
                       activeConnectionId == connectionId,
                       queryDatabase == database,
+                      query === targetQuery,
                       query.selectedAgent == kind else { return }
+                guard query.text == originalText else {
+                    query.agentError = "The query changed during generation. Generate again to avoid overwriting your edits."
+                    return
+                }
                 let generatedSQL = response.query.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let replacementRange {
                     query.replaceSQL(in: replacementRange, with: response.query)
@@ -1165,7 +1209,10 @@ final class AppState {
                 query.agentStatus = "Generated with \(kind.displayName)"
                 saveCurrentQuery()
             } catch {
-                guard agentRunGeneration == runGeneration else { return }
+                guard agentRunGeneration == runGeneration,
+                      self.connectionGeneration == connectionGeneration,
+                      activeConnectionId == connectionId, queryDatabase == database,
+                      query === targetQuery else { return }
                 query.agentError = error.localizedDescription
             }
         }
@@ -1175,10 +1222,18 @@ final class AppState {
     func cancelQueryAgentGeneration() {
         activeAgentTask?.cancel()
         activeAgentTask = nil
+        agentTimeoutTask?.cancel()
+        agentTimeoutTask = nil
         agentRunGeneration += 1
         query.agentExecuting = false
         query.agentStatus = ""
         query.hideAgentMode()
+    }
+
+    func refreshLocalQuerySchema() {
+        localQuerySchemaCache = nil
+        query.agentError = ""
+        query.agentStatus = "AI schema will refresh on the next generation."
     }
 
     func showAgentModeAtCursor() {

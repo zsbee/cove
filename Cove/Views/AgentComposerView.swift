@@ -54,6 +54,7 @@ struct QueryEditorControls: View {
 struct AgentComposer: View {
     @Environment(AppState.self) private var state
     @State private var promptHeight: CGFloat = 20
+    @State private var showLocalSettings = false
 
     private var placeholder: String {
         if let selected = state.query.selectedAgent {
@@ -108,6 +109,26 @@ struct AgentComposer: View {
             HStack(spacing: 8) {
                 AgentPicker()
 
+                if query.selectedAgent == .ollama {
+                    Button {
+                        showLocalSettings = true
+                    } label: {
+                        Label("Local AI Settings", systemImage: "gearshape")
+                            .labelStyle(.iconOnly)
+                    }
+                    .help("Configure and test local Ollama")
+                    .disabled(query.agentExecuting)
+
+                    Button {
+                        state.refreshLocalQuerySchema()
+                    } label: {
+                        Label("Refresh AI Schema", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
+                    }
+                    .help("Reload database metadata on the next generation")
+                    .disabled(query.agentExecuting)
+                }
+
                 Spacer(minLength: 0)
 
                 if query.agentExecuting {
@@ -129,6 +150,7 @@ struct AgentComposer: View {
         }
         .controlSize(.small)
         .padding(14)
+        .sheet(isPresented: $showLocalSettings) { LocalQuerySettingsView() }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)

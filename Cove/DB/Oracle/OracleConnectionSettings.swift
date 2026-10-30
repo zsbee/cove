@@ -79,6 +79,16 @@ struct OracleConnectionPlan: Sendable {
 }
 
 enum OracleTNS {
+    static func validateForJDBC(settings: OracleConnectionSettings) throws {
+        // JDBC reads the original descriptor; native endpoint restrictions must
+        // not reject routing options that JDBC supports.
+        let location = try settings.resolvedLocation
+        let names = try aliases(in: location.directory)
+        guard names.contains(location.alias.uppercased()) else {
+            throw OracleConfigurationError("TNS alias '\(location.alias)' was not found in tnsnames.ora.")
+        }
+    }
+
     static func connect<Result: Sendable>(plan: OracleConnectionPlan,
                                          attempt: @Sendable (OracleEndpoint) async throws -> Result) async throws -> Result {
         var errors: [String] = []

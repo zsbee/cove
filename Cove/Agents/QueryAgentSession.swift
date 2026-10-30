@@ -7,7 +7,10 @@ actor QueryAgentSession {
         self.kind = kind
     }
 
-    func generate(request: QueryAgentRequest) async throws -> QueryAgentResponse {
+    func generate(request: QueryAgentRequest, localSettings: LocalQuerySettings = .init()) async throws -> QueryAgentResponse {
+        if kind == .ollama {
+            return try await OllamaQueryClient(settings: localSettings).generate(request: request)
+        }
         let workspaceURL = try Self.workspaceURL()
         let outputURL = kind == .codex ? Self.temporaryURL(prefix: "cove-codex-output", pathExtension: "txt") : nil
         defer {

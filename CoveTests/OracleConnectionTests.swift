@@ -56,6 +56,50 @@ final class OracleConnectionTests: XCTestCase {
         XCTAssertThrowsError(try settings.resolvedLocation)
     }
 
+    func testConnectionPanelAllowsJDBCRoutingWithoutNativeRestrictions() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("cove-jdbc-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("tnsnames.ora")
+        var settings = OracleConnectionSettings()
+        settings.mode = .tns
+        settings.tnsName = "demo"
+        settings.tnsAdmin = directory.path
+
+        for text in [
+            descriptor.replacingOccurrences(of: "LOAD_BALANCE=OFF", with: "LOAD_BALANCE=ON"),
+            """
+            demo=(DESCRIPTION=(LOAD_BALANCE=ON)
+              (ADDRESS_LIST=(LOAD_BALANCE=ON)(FAILOVER=OFF)
+                (ADDRESS=(PROTOCOL=TCP)(HOST=first.example)(PORT=1521))
+                (ADDRESS=(PROTOCOL=TCPS)(HOST=second.example)(PORT=2484)))
+              (CONNECT_DATA=(SERVICE_NAME=demo_service)))
+            """,
+            descriptor.replacingOccurrences(of: "FAILOVER=ON", with: "FAILOVER=OFF"),
+        ] {
+            try text.write(to: file, atomically: true, encoding: .utf8)
+            XCTAssertNoThrow(try BackendType.oracle.validateConnectionSettings(settings))
+        }
+
+        settings.jdbcURL = "jdbc:oracle:thin:@other?TNS_ADMIN=\(directory.path)"
+        settings.tnsName = "ignored"
+        settings.tnsAdmin = "/ignored"
+        XCTAssertNoThrow(try BackendType.oracle.validateConnectionSettings(settings))
+        settings.jdbcURL = ""
+        settings.tnsAdmin = directory.path
+        settings.tnsName = "missing"
+        XCTAssertThrowsError(try BackendType.oracle.validateConnectionSettings(settings))
+        settings.tnsName = "demo"
+        try "demo=(DESCRIPTION=".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try BackendType.oracle.validateConnectionSettings(settings))
+        try FileManager.default.removeItem(at: file)
+        XCTAssertThrowsError(try BackendType.oracle.validateConnectionSettings(settings))
+        settings.jdbcURL = "jdbc:oracle:thin:user/password@demo"
+        XCTAssertThrowsError(try BackendType.oracle.validateConnectionSettings(settings))
+        settings.jdbcURL = "jdbc:oracle:thin:@demo?password=secret"
+        XCTAssertThrowsError(try BackendType.oracle.validateConnectionSettings(settings))
+    }
+
     func testSavedSettingsRoundTripWithoutPasswordsAndOldConnectionsDecode() throws {
         var settings = OracleConnectionSettings()
         settings.mode = .tns

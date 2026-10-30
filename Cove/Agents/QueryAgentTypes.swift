@@ -1,6 +1,7 @@
 import Foundation
 
 enum QueryAgentKind: String, CaseIterable, Identifiable, Sendable {
+    case ollama
     case claude
     case codex
 
@@ -8,6 +9,7 @@ enum QueryAgentKind: String, CaseIterable, Identifiable, Sendable {
 
     var displayName: String {
         switch self {
+        case .ollama: "Ollama (Local)"
         case .claude: "Claude Code"
         case .codex: "Codex CLI"
         }
@@ -15,6 +17,7 @@ enum QueryAgentKind: String, CaseIterable, Identifiable, Sendable {
 
     var shortName: String {
         switch self {
+        case .ollama: "Ollama"
         case .claude: "Claude"
         case .codex: "Codex"
         }
@@ -22,6 +25,7 @@ enum QueryAgentKind: String, CaseIterable, Identifiable, Sendable {
 
     var systemImage: String {
         switch self {
+        case .ollama: "desktopcomputer"
         case .claude: "sparkle"
         case .codex: "hexagon"
         }
@@ -29,6 +33,7 @@ enum QueryAgentKind: String, CaseIterable, Identifiable, Sendable {
 
     var executableNames: [String] {
         switch self {
+        case .ollama: []
         case .claude: ["claude"]
         case .codex: ["codex"]
         }
@@ -36,6 +41,7 @@ enum QueryAgentKind: String, CaseIterable, Identifiable, Sendable {
 
     func arguments(workspaceURL: URL, outputURL: URL?) -> [String] {
         switch self {
+        case .ollama: []
         case .claude:
             [
                 "--print",

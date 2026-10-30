@@ -9,7 +9,7 @@ final class QueryState {
     var status = ""
     var result: QueryResult?
     var agentPrompt = ""
-    var selectedAgent: QueryAgentKind? = .claude
+    var selectedAgent: QueryAgentKind? = .ollama
     var agentInputVisible = false
     var agentTargetRange: NSRange?
     var agentExecuting = false

@@ -106,7 +106,7 @@ enum BackendType: String, Codable, CaseIterable, Sendable {
 
     func validateConnectionSettings(_ settings: OracleConnectionSettings) throws {
         if capabilities.supportsTNS, settings.mode == .tns {
-            _ = try OracleTNS.load(settings: settings)
+            try OracleTNS.validateForJDBC(settings: settings)
         }
     }
 
