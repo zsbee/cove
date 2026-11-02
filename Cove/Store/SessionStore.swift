@@ -21,6 +21,7 @@ struct TabSession: Codable {
     var selectedEnvironment: ConnectionEnvironment?
     var environments: [String: EnvironmentSession]?
     var connectionSessions: [String: ConnectionSession]?
+    var showQueryHistory: Bool?
 }
 
 struct MultiTabSessionState: Codable {

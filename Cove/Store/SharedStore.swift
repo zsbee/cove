@@ -8,6 +8,7 @@ final class SharedStore {
 
     var savedConnections: [SavedConnection]
     var savedQueries: [String: String]
+    let queryHistory = QueryHistoryStore()
     var activeTabs: [UUID: AppState] = [:]
     var isTerminating = false
 

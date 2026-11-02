@@ -40,6 +40,13 @@ struct CoveApp: App {
             }
 
             CommandGroup(after: .toolbar) {
+                Toggle("Query History", isOn: Binding(
+                    get: { focusedTab?.showQueryHistory ?? false },
+                    set: { _ in focusedTab?.toggleQueryHistory() }
+                ))
+                .keyboardShortcut("h", modifiers: [.command, .shift])
+                .disabled(focusedTab == nil)
+
                 Button("Refresh") {
                     focusedTab?.refreshCurrentScope()
                 }

@@ -39,6 +39,7 @@ Adding a new backend requires zero changes to UI code — see [`DB/README.md`](C
 - **Browse** schemas, tables, views, indexes, and keys in a sidebar tree
 - **Edit rows** inline with SQL/CQL preview before commit
 - **Run queries** with syntax highlighting and autocomplete
+- **Query history** — the latest 100 queries across connections, with persistent starred favorites and offline preview
 - **Agent Mode** — generate or edit queries locally with Ollama, or with Claude Code or Codex CLI
 - **Multiple tabs** with independent connections (Cmd+T)
 - **Connection environments** — local, dev, staging, production
@@ -47,6 +48,18 @@ Adding a new backend requires zero changes to UI code — see [`DB/README.md`](C
 - **Session persistence** — connections and tabs restore across app relaunches
 - **Color-coded indicators** and connection tooltips
 - Native macOS UI — no Electron, no web views
+
+## Query History
+
+Open the right-hand panel with the **Query History** toolbar button or **Shift+Cmd+H** (View → Query History). It is available without an active connection and shared across all tabs, connections, and environments.
+
+- Explicit editor runs save the submitted selection or current block, including failed queries. Repeating identical SQL updates its timestamp rather than creating a duplicate.
+- **Starred** queries stay at the top and are never automatically removed. The editor's star button saves the current selection or block without executing it.
+- **Recent** keeps the latest 100 unstarred queries. Search matches full query text in both sections.
+- Select a query to preview and copy its full text, even when disconnected. **Insert in Editor** requires a connection and appends a new block without replacing existing SQL or executing anything.
+- Right-click a query to delete it. **Clear Recent** in the panel's actions menu removes only unstarred queries.
+
+History is saved locally in `~/Library/Application Support/Cove/query-history.json`, separately from connection-scoped editor drafts. SQL is stored as plain text and may contain sensitive literals; no results or connection credentials are added. Existing drafts are not imported as historical executions. Deleting a connection does not delete history.
 
 ## Agent Mode
 
@@ -172,7 +185,6 @@ Contributions welcome:
 
 - Import/export (CSV, JSON, SQL)
 - Data filtering and search
-- Query history panel
 - SSL/TLS certificate configuration UI
 - Query explain/analyze visualization
 - Homebrew cask

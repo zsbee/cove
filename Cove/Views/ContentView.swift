@@ -13,8 +13,8 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 ConnectionRail()
 
-                if state.connection != nil {
-                    HSplitView {
+                HSplitView {
+                    if state.connection != nil {
                         if state.showSidebar {
                             SidebarView()
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -43,51 +43,34 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .layoutPriority(1)
                         }
+                    } else {
+                        welcomeView
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(1)
+                    }
 
-                        if state.showInspector, let table = state.table,
-                           state.contentMode == .table, table.selectedRow != nil {
-                            RowInspectorView(table: table)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .strokeBorder(.quaternary, lineWidth: 1)
-                                )
-                                .padding(.leading, 4)
-                                .frame(minWidth: 204, idealWidth: 284, maxWidth: 404)
-                        }
+                    if state.showQueryHistory {
+                        QueryHistoryView()
+                            .background { VisualEffectBackground(material: .underWindowBackground) }
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary, lineWidth: 1))
+                            .padding(.leading, 4)
+                            .frame(minWidth: 280, idealWidth: 320, maxWidth: 520)
+                    } else if state.connection != nil, state.showInspector, let table = state.table,
+                              state.contentMode == .table, table.selectedRow != nil {
+                        RowInspectorView(table: table)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(.quaternary, lineWidth: 1)
+                            )
+                            .padding(.leading, 4)
+                            .frame(minWidth: 204, idealWidth: 284, maxWidth: 404)
                     }
-                    .hideSplitDividers()
-                    .padding(.trailing, 6)
-                    .padding(.vertical, 6)
-                } else {
-                    VStack(spacing: 16) {
-                        Image(nsImage: NSApp.applicationIconImage)
-                            .resizable()
-                            .frame(width: 64, height: 64)
-                            .opacity(0.6)
-                        HStack(spacing: 5) {
-                            Text("Click")
-                            Button {
-                                state.openDialog()
-                            } label: {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 22, height: 22)
-                                    .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 5))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 5)
-                                            .strokeBorder(.quaternary, lineWidth: 1)
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                            Text("to create a new connection")
-                        }
-                        .font(.system(size: 13))
-                        .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .hideSplitDividers()
+                .padding(.trailing, 6)
+                .padding(.vertical, 6)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -184,10 +167,34 @@ struct ContentView: View {
             }
             .disabled(!connected)
 
-            Button { state.showInspector.toggle() } label: {
+            Button { state.toggleInspector() } label: {
                 Image(systemName: "sidebar.trailing")
             }
             .disabled(!canInspect)
+
+            Toggle(isOn: Binding(
+                get: { state.showQueryHistory },
+                set: { _ in state.toggleQueryHistory() }
+            )) {
+                Label("Query History", systemImage: "clock.arrow.circlepath")
+            }
+            .toggleStyle(.button)
+            .help("Show or hide query history (⇧⌘H)")
+        }
+    }
+
+    private var welcomeView: some View {
+        VStack(spacing: 16) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 64, height: 64)
+                .opacity(0.6)
+            Button("Create a New Connection", systemImage: "plus") {
+                state.openDialog()
+            }
+            Text("Query history is available without a connection.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
     }
 

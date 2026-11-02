@@ -30,6 +30,15 @@ struct QueryEditorControls: View {
 
             Spacer(minLength: 0)
 
+            Button {
+                state.starCurrentQuery()
+            } label: {
+                Label("Star Current Query", systemImage: "star")
+                    .labelStyle(.iconOnly)
+            }
+            .disabled(state.query.runnableSQL.isEmpty)
+            .help("Save the current SQL selection or block to Starred without running it")
+
             if state.query.agentInputVisible {
                 runCurrentButton
             } else {

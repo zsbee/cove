@@ -27,6 +27,8 @@ final class AppState {
     var showSidebar = true
     var sidebarWidth: CGFloat = 220
     var showInspector = false
+    var showQueryHistory = true
+    var selectedHistoryID: UUID?
     var showQueryEditor = false
     var contentMode: ContentMode = .empty
     var tableTab: TableTab = .data
@@ -535,6 +537,33 @@ final class AppState {
 
     // MARK: - Query Toggle
 
+    func toggleQueryHistory() {
+        showQueryHistory.toggle()
+        if showQueryHistory { showInspector = false }
+        saveSession()
+    }
+
+    func toggleInspector() {
+        showInspector.toggle()
+        if showInspector { showQueryHistory = false }
+        saveSession()
+    }
+
+    func starCurrentQuery() {
+        guard let id = shared.queryHistory.star(query.runnableSQL) else { return }
+        selectedHistoryID = id
+        showQueryHistory = true
+        showInspector = false
+        saveSession()
+    }
+
+    func insertHistoryQuery(_ sql: String) {
+        guard connection != nil, !query.agentExecuting else { return }
+        if !showQueryEditor { toggleQuery() }
+        query.appendSQL(sql)
+        saveCurrentQuery()
+    }
+
     func toggleQuery() {
         if showQueryEditor {
             showQueryEditor = false
@@ -719,6 +748,7 @@ final class AppState {
         table.selectedColumn = col
         focusedColumn = col
         showInspector = true
+        showQueryHistory = false
     }
 
     func inspectorFieldChanged(col: Int, value: String) {
@@ -748,6 +778,7 @@ final class AppState {
         table.selectedRow = rowIdx
         focusedColumn = 0
         showInspector = true
+        showQueryHistory = false
     }
 
     func deleteSelectedRow() {
@@ -1050,6 +1081,7 @@ final class AppState {
         guard !sql.isEmpty else { return }
 
         saveCurrentQuery()
+        shared.queryHistory.record(sql)
         query.executing = true
         query.error = ""
         query.status = ""
@@ -1265,6 +1297,7 @@ final class AppState {
         guard table?.selectedRow != nil else { return }
         focusedColumn = table?.selectedColumn ?? 0
         showInspector = true
+        showQueryHistory = false
     }
 
     func tableCopyCell() {
@@ -1298,6 +1331,7 @@ final class AppState {
         guard let session = connectionSessions[id] else { return }
 
         showInspector = session.showInspector ?? false
+        if showQueryHistory { showInspector = false }
 
         if let expandedPaths = session.expandedPaths {
             let sorted = expandedPaths.sorted { $0.count < $1.count }
@@ -1362,7 +1396,8 @@ final class AppState {
             sidebarWidth: sidebarWidth,
             selectedEnvironment: selectedEnvironment,
             environments: envDict,
-            connectionSessions: connDict.isEmpty ? nil : connDict
+            connectionSessions: connDict.isEmpty ? nil : connDict,
+            showQueryHistory: showQueryHistory
         )
         shared.saveTabSession(tab)
     }
@@ -1443,6 +1478,7 @@ final class AppState {
         print("[Cove] restoreSession(\(tabId.uuidString.prefix(8))): claimed session, env=\(tab.selectedEnvironment?.rawValue ?? "nil"), envCount=\(tab.environments?.count ?? 0)")
 
         showSidebar = tab.showSidebar
+        showQueryHistory = tab.showQueryHistory ?? true
         if let w = tab.sidebarWidth { sidebarWidth = w }
         if let env = tab.selectedEnvironment { selectedEnvironment = env }
 
