@@ -148,6 +148,29 @@ This builds and opens `.build/Cove.app`, including database logos, the app icon,
 and the DuckDB library. To reopen it later, use `open .build/Cove.app`.
 Pass `--build-only` to skip launching.
 
+To build and install into `~/Applications`, using the same prerequisites:
+
+```bash
+make install
+```
+
+This builds `.build/Cove.app`, copies the complete bundle to
+`~/Applications/Cove.app`, and launches the installed app. Quit Cove before
+updating. Existing connections, query history, preferences, and Keychain entries
+are left untouched.
+
+```bash
+make install OPEN_APP=0                     # Install without launching
+make install INSTALL_DIR="/custom/path"     # Use another absolute directory
+make build                                 # Build without installing or launching
+make run                                   # Open the installed app
+make test-install                          # Test installs/updates in a temporary directory
+```
+
+The installer verifies the copied app's signature before replacing an existing
+Cove bundle and refuses to overwrite unrelated files or symlinks. No `sudo` is
+needed for the default install location.
+
 The script uses the installed macOS 26.5 SDK when available because the macOS 27
 Command Line Tools SDK lacks the SwiftUI macro plugin. Set `COVE_SDK` to override
 the SDK path. It also applies a local OracleNIO workaround for Swift 6.4's
